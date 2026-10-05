@@ -5,6 +5,10 @@
   "description": "Periodic size+lines+age trimming of the global opencode.log via an OpenCode v2 server plugin",
   "license": "MIT",
   "author": "MediumEffort",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/medium-effort/opencode-log-trimmer.git"
+  },
   "keywords": [
     "opencode",
     "opencode-plugin",

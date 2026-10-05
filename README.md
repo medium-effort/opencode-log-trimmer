@@ -38,7 +38,7 @@ Pick one:
    opencode plugin add opencode-log-trimmer
    ```
 
-   > Not yet published to npm (currently `0.1.0` local-only). Until then, use a git spec (`opencode plugin add github:<you>/opencode-log-trimmer`) or option 2 below.
+   > Not yet published to npm. Until then, install from git (`opencode plugin add github:medium-effort/opencode-log-trimmer`) or use option 2 below.
 
 2. **Global-dir copy:**
 
