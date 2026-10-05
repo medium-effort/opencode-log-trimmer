@@ -7,9 +7,12 @@ Periodic size + lines + age trimming of the global `opencode.log` via an OpenCod
 - Targets the global log file (see Windows path note below), not per-project logs.
 - Runs as an OpenCode v2 server plugin (`Plugin.define`, id `opencode-log-trimmer`).
 - **Trim-on-load:** runs one trim pass immediately on `setup()` (fire-and-forget, never throws to the host).
-- **Interval:** arms `setInterval(30 min)` with `unref()` so it only runs while the opencode service is alive.
+- **Interval:** arms `setInterval(intervalMs)` (default 30 min) with `unref()` so it only runs while the opencode service is alive.
 - **No daemon / no cron:** there is no background process, no cron dependency, and nothing survives after the service exits. Cleanup clears the interval on plugin unload.
 - Enforces a **combination retention policy**: a trim pass satisfies ALL of `maxSizeMB` AND `maxLines` AND `maxAgeDays`, with the most restrictive limit winning. Kept content is always the most recent tail. Over-limit dimensions cut to `trimTargetRatio` x limit (hysteresis), so the next interval rarely re-trims.
+- **Manual trim:** palette command "Trim opencode.log" and slash command `/trim-log` (via the `./tui` entry, id `opencode-log-trimmer-tui`) call the trim RPC on demand and report the result via toast.
+- **RPC:** exposes `logTrimRpc` (id `opencode-log-trimmer`, method `trim`, optional `optsOverride`) for other plugins/clients, guarded by a 30 s timeout (`error:timeout` on expiry).
+- **Observability:** every pass (trim-on-load, interval, RPC) writes `opencode.log.trimmer-status.json` next to the log (`{ ts, source, result }`) and persists the last `TrimResult` to plugin storage (`lastTrim`).
 
 ## Retention options
 
@@ -29,11 +32,13 @@ Periodic size + lines + age trimming of the global `opencode.log` via an OpenCod
 
 Pick one:
 
-1. **npm global (recommended):**
+1. **npm global (recommended, once published):**
 
    ```sh
-   opencode plugin add --global opencode-log-trimmer
+   opencode plugin add opencode-log-trimmer
    ```
+
+   > Not yet published to npm (currently `0.1.0` local-only). Until then, use a git spec (`opencode plugin add github:<you>/opencode-log-trimmer`) or option 2 below.
 
 2. **Global-dir copy:**
 
@@ -45,7 +50,7 @@ Pick one:
 
 3. **Project-local dev (this repo):**
 
-   Use the dev harness shim at `.opencode/plugins/log-trimmer-dev.ts` (see Dev harness below). No install step; opencode loads it from the project.
+   Use the dev harness shims at `.opencode/plugins/log-trimmer/` (see Dev harness below). No install step; opencode loads them from the project.
 
 ## Config example
 
@@ -60,29 +65,29 @@ In your opencode config (`~/.config/opencode/opencode.json` or project `.opencod
 }
 ```
 
-With custom retention (where supported by your opencode version — plugin options object):
+With custom retention (object form — options live on the plugin entry):
 
 ```json
 {
   "plugins": [
-    "opencode-log-trimmer"
-  ],
-  "pluginOptions": {
-    "opencode-log-trimmer": {
-      "maxSizeMB": 20,
-      "maxLines": 20000,
-      "maxAgeDays": 14,
-      "intervalMs": 1800000,
-      "trimTargetRatio": 0.5
+    {
+      "package": "opencode-log-trimmer",
+      "options": {
+        "maxSizeMB": 20,
+        "maxLines": 20000,
+        "maxAgeDays": 14,
+        "intervalMs": 1800000,
+        "trimTargetRatio": 0.5
+      }
     }
-  }
+  ]
 }
 ```
 
 For a one-off dry run against a copy (no writes):
 
 ```ts
-import { trimLog } from "./src/log-trimmer/index.js";
+import { trimLog } from "./src/log-trimmer/trim.js";
 
 await trimLog({
   maxSizeMB: 20,
@@ -106,12 +111,19 @@ await trimLog({
 
 ## Dev harness usage
 
-`.opencode/plugins/log-trimmer-dev.ts` is a minimal local harness for project-local testing:
+`.opencode/plugins/log-trimmer/` holds minimal local harnesses for project-local testing (re-export only, no logic):
 
 ```ts
-export { default } from "../../src/log-trimmer/index.js";
+// index.ts (server entry)
+export { default } from "../../../src/log-trimmer/index.js";
+// tui.ts (TUI entry)
+export { default } from "../../../src/log-trimmer/tui.js";
 ```
 
 - Keep minimal: re-export only, no logic, no options handling.
-- From `.opencode/plugins/` the relative path `../../src/log-trimmer/index.js` resolves to `src/log-trimmer/index.ts` at the repo root.
-- Opencode loads this shim automatically for this project; edit `src/log-trimmer/*`, reload the service, and the trim-on-load pass exercises your change. Use `logPathOverride` + `dryRun: true` while iterating to avoid touching the real global log.
+- From `.opencode/plugins/log-trimmer/` the relative path `../../../src/log-trimmer/*.js` resolves to `src/log-trimmer/*.ts` at the repo root.
+- Opencode loads these shims automatically for this project; edit `src/log-trimmer/*`, reload the service, and the trim-on-load pass exercises your change. Use `logPathOverride` + `dryRun: true` while iterating to avoid touching the real global log.
+
+## License
+
+MIT — see `LICENSE`.
