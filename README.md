@@ -39,14 +39,18 @@ Pick one:
    ```
 
    > Not yet published to npm. Until then, install from git (`opencode plugin add github:medium-effort/opencode-log-trimmer`) or use option 2 below.
+   >
+   > Windows note: git-URL installs currently fail on Windows — see opencode [#21126](https://github.com/anomalyco/opencode/issues/21126) (the raw URL becomes a cache directory name containing characters illegal in Windows paths). On Windows, use option 2 until the package is on npm.
 
-2. **Global-dir copy:**
+2. **Global-dir copy (also the Windows workaround):**
 
    Copy this package (or its built output) to the global plugin dir, e.g.:
 
    ```sh
    cp -r ./opencode-log-trimmer ~/.config/opencode/plugins/log-trimmer
    ```
+
+   Remove `node_modules`, `build-test`, and `.git` from the copied dir if present; global plugins are auto-discovered from that layout with no install step.
 
 3. **Project-local dev (this repo):**
 
