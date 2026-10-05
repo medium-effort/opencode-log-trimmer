@@ -236,6 +236,7 @@ test("status file never affects trimLog size accounting", async () => {
         logPathOverride: logPath,
         dryRun: true,
         maxLines: 10,
+        trimTargetRatio: 1,
         maxAgeDays: 365,
         maxSizeMB: 20,
       }),
@@ -263,6 +264,7 @@ test("dry-run trim leaves the log untouched while status is still written", asyn
         logPathOverride: logPath,
         dryRun: true,
         maxLines: 5,
+        trimTargetRatio: 1,
         maxAgeDays: 365,
       }),
     );

@@ -9,16 +9,17 @@ Periodic size + lines + age trimming of the global `opencode.log` via an OpenCod
 - **Trim-on-load:** runs one trim pass immediately on `setup()` (fire-and-forget, never throws to the host).
 - **Interval:** arms `setInterval(30 min)` with `unref()` so it only runs while the opencode service is alive.
 - **No daemon / no cron:** there is no background process, no cron dependency, and nothing survives after the service exits. Cleanup clears the interval on plugin unload.
-- Enforces a **combination retention policy**: a trim pass satisfies ALL of `maxSizeMB` AND `maxLines` AND `maxAgeDays`, with the most restrictive limit winning. Kept content is always the most recent tail.
+- Enforces a **combination retention policy**: a trim pass satisfies ALL of `maxSizeMB` AND `maxLines` AND `maxAgeDays`, with the most restrictive limit winning. Kept content is always the most recent tail. Over-limit dimensions cut to `trimTargetRatio` x limit (hysteresis), so the next interval rarely re-trims.
 
 ## Retention options
 
 | Option | Default | Meaning |
 |---|---|---|
 | `maxSizeMB` | `20` | Max log size in megabytes. Oversize output is reduced from the head so the tail (newest bytes) wins. |
-| `maxLines` | `20000` | Max retained lines. Overflow keeps `lines.slice(-maxLines)` (newest lines). |
+| `maxLines` | `20000` | Max retained lines. Overflow keeps the newest `trimTargetRatio x maxLines` lines (hysteresis). |
 | `maxAgeDays` | `14` | Max line age in days. Lines with a parseable timestamp older than `now - maxAgeDays` are dropped. A file `mtime` older than `maxAgeDays` alone is sufficient to trigger a trim pass. |
 | `intervalMs` | `1800000` | Trim interval in ms (30 min). |
+| `trimTargetRatio` | `0.5` | Hysteresis: when a trim triggers, over-limit dimensions are cut to this fraction of their limit (not the limit itself), so it takes time before the log is trimmable again. `(0, 1]`; values `> 1` clamp to `1` (old at-the-limit behavior). |
 | `logPathOverride` | unset | Override the resolved log path (tests / custom locations). When unset, `resolveLogPath()` is used. |
 | `dryRun` | unset | When `true`, strictly read-only: computes and reports `TrimResult` without writing any file. |
 
@@ -71,7 +72,8 @@ With custom retention (where supported by your opencode version — plugin optio
       "maxSizeMB": 20,
       "maxLines": 20000,
       "maxAgeDays": 14,
-      "intervalMs": 1800000
+      "intervalMs": 1800000,
+      "trimTargetRatio": 0.5
     }
   }
 }

@@ -27,7 +27,7 @@ function logTrimStart(logPath: string, opts: TrimOptions): void {
     console.log(
       `[opencode-log-trimmer] trim start path=${logPath} ` +
         `maxSizeMB=${opts.maxSizeMB} maxLines=${opts.maxLines} ` +
-        `maxAgeDays=${opts.maxAgeDays} intervalMs=${opts.intervalMs}`,
+        `maxAgeDays=${opts.maxAgeDays} intervalMs=${opts.intervalMs} trimTargetRatio=${opts.trimTargetRatio}`,
     );
   } catch {
     // Debug logs must never throw to the host.

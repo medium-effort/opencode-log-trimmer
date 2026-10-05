@@ -13,6 +13,7 @@ const TrimRpcInputSchema = {
         maxLines: { type: "number" },
         maxAgeDays: { type: "number" },
         intervalMs: { type: "number" },
+        trimTargetRatio: { type: "number" },
         logPathOverride: { type: "string" },
         dryRun: { type: "boolean" },
       },

@@ -1,6 +1,7 @@
 import { promises as fsp } from "fs";
 import path from "path";
 import type { TrimOptions, TrimResult } from "./options.js";
+import { resolveTrimTargets } from "./options.js";
 import { resolveLogPath } from "./path.js";
 import { parseLogTimestamp } from "./age.js";
 
@@ -139,6 +140,7 @@ export async function trimLog(opts: TrimOptions): Promise<TrimResult> {
 
     const maxBytes = Math.floor(opts.maxSizeMB * 1024 * 1024);
     const cutoff = Date.now() - opts.maxAgeDays * 86400000;
+    const { targetLines, targetBytes } = resolveTrimTargets(opts);
 
     // Age pass: drop lines with a parseable timestamp older than the
     // cutoff. Unparseable lines are always retained.
@@ -153,15 +155,18 @@ export async function trimLog(opts: TrimOptions): Promise<TrimResult> {
       ageKept.push(line);
     }
 
-    // Lines pass: keep the tail so the most recent lines win.
+    // Lines pass: keep the tail so the most recent lines win. Over-limit
+    // content cuts to the hysteresis target (not the limit) so it takes
+    // time before the log is trimmable again.
     let kept = ageKept;
     const linesTruncated = kept.length > opts.maxLines;
     if (linesTruncated) {
-      kept = kept.slice(-opts.maxLines);
+      kept = kept.slice(-Math.max(1, targetLines));
     }
 
     // Size pass (single-pass tail budget): keep the tail bytes so the
-    // most recent content wins. Precompute per-line bytes once and walk
+    // most recent content wins. Over-limit content cuts to the hysteresis
+    // byte target (not the limit). Precompute per-line bytes once and walk
     // from the tail — no repeated join/byteLength loop.
     const lineBytes: number[] = new Array<number>(kept.length);
     let totalWithNewlines = 0;
@@ -191,7 +196,7 @@ export async function trimLog(opts: TrimOptions): Promise<TrimResult> {
       for (let i = kept.length - 1; i >= 0; i--) {
         acc += lineBytes[i] as number;
         const suffixBytes = hadTrailingNewline ? acc : (acc as number) - 1;
-        if ((suffixBytes as number) <= maxBytes) {
+        if ((suffixBytes as number) <= Math.max(1, targetBytes)) {
           cutoff = i;
         } else {
           break;
@@ -211,11 +216,11 @@ export async function trimLog(opts: TrimOptions): Promise<TrimResult> {
           : hadTrailingNewline
             ? `${kept.join("\n")}\n`
             : kept.join("\n");
-      if (Buffer.byteLength(out, "utf8") > maxBytes) {
+      if (Buffer.byteLength(out, "utf8") > Math.max(1, targetBytes)) {
         // A single line still exceeds the budget:
         // keep the tail bytes of the serialized output.
         const buf = Buffer.from(out, "utf8");
-        out = buf.slice(buf.length - maxBytes).toString("utf8");
+        out = buf.slice(buf.length - Math.max(1, targetBytes)).toString("utf8");
       }
     }
 

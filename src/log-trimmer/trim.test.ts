@@ -114,6 +114,7 @@ test("trimLog dryRun is strictly read-only and byte-identical", async () => {
     const opts = resolveOptions({
       logPathOverride: logPath,
       maxLines: 3,
+      trimTargetRatio: 1,
       maxAgeDays: 365,
       dryRun: true,
     });
@@ -213,6 +214,7 @@ test("trimLog rewrites via same-dir scratch plus rename with no residue", async 
     const opts = resolveOptions({
       logPathOverride: logPath,
       maxLines: 4,
+      trimTargetRatio: 1,
       maxAgeDays: 365,
     });
     const result = await trimLog(opts);
@@ -283,6 +285,7 @@ test("trimLog locked-dest surfaces error:write-failed with after==before and no 
     const opts = resolveOptions({
       logPathOverride: logPath,
       maxLines: 4,
+      trimTargetRatio: 1,
       maxAgeDays: 365,
     });
     const result = await trimLog(opts);
@@ -352,6 +355,7 @@ test("trimLog retries a transient rename failure and succeeds", async () => {
     const opts = resolveOptions({
       logPathOverride: logPath,
       maxLines: 4,
+      trimTargetRatio: 1,
       maxAgeDays: 365,
     });
     const result = await trimLog(opts);
@@ -440,6 +444,7 @@ test("trimLog falls back to copyFile when rename is denied, tail-correct with no
     const opts = resolveOptions({
       logPathOverride: logPath,
       maxLines: 4,
+      trimTargetRatio: 1,
       maxAgeDays: 365,
     });
     const result = await trimLog(opts);
@@ -519,6 +524,7 @@ test("trimLog falls back to r+ truncate+write when rename and copy fail, identit
     const opts = resolveOptions({
       logPathOverride: logPath,
       maxLines: 4,
+      trimTargetRatio: 1,
       maxAgeDays: 365,
     });
     const result = await trimLog(opts);
@@ -586,6 +592,7 @@ test("trimLog all fallback layers denied never throws, error:write-failed with a
     const opts = resolveOptions({
       logPathOverride: logPath,
       maxLines: 4,
+      trimTargetRatio: 1,
       maxAgeDays: 365,
     });
     let result: Awaited<ReturnType<typeof trimLog>> | null = null;
@@ -642,6 +649,7 @@ test("trimLog trims while a hot open handle is held, tail-correct with no residu
       const opts = resolveOptions({
         logPathOverride: logPath,
         maxLines: 4,
+      trimTargetRatio: 1,
         maxAgeDays: 365,
       });
       const result = await trimLog(opts);
@@ -658,6 +666,114 @@ test("trimLog trims while a hot open handle is held, tail-correct with no residu
         // Best-effort holder cleanup, never throws the test.
       }
     }
+  } finally {
+    await cleanupDir(dir);
+  }
+});
+
+test("trimLog default hysteresis cuts lines to half the limit", async () => {
+  const dir = await makeLogDir();
+  try {
+    const lines = Array.from(
+      { length: 10 },
+      (_, i) => `hyst entry ${String(i).padStart(3, "0")} :: payload`,
+    );
+    const logPath = await writeLog(dir, `${lines.join("\n")}\n`);
+    const opts = resolveOptions({
+      logPathOverride: logPath,
+      maxLines: 4,
+      maxAgeDays: 365,
+    });
+    assert.equal(opts.trimTargetRatio, 0.5);
+    const result = await trimLog(opts);
+    assert.equal(result.trimmed, true);
+    assert.equal(result.afterLines, 2);
+    const after = await fsp.readFile(logPath, "utf8");
+    assert.equal(after, `${lines.slice(-2).join("\n")}\n`);
+    const entries = await fsp.readdir(dir);
+    assert.deepEqual(entries, ["opencode.log"]);
+  } finally {
+    await cleanupDir(dir);
+  }
+});
+
+test("trimLog honors a custom trimTargetRatio", async () => {
+  const dir = await makeLogDir();
+  try {
+    const lines = Array.from(
+      { length: 20 },
+      (_, i) => `custom ratio entry ${String(i).padStart(3, "0")} :: payload`,
+    );
+    const logPath = await writeLog(dir, `${lines.join("\n")}\n`);
+    const opts = resolveOptions({
+      logPathOverride: logPath,
+      maxLines: 10,
+      maxAgeDays: 365,
+      trimTargetRatio: 0.8,
+    });
+    const result = await trimLog(opts);
+    assert.equal(result.trimmed, true);
+    assert.equal(result.afterLines, 8);
+    const after = await fsp.readFile(logPath, "utf8");
+    assert.equal(after, `${lines.slice(-8).join("\n")}\n`);
+  } finally {
+    await cleanupDir(dir);
+  }
+});
+
+test("trimLog size hysteresis cuts to half the byte budget", async () => {
+  const dir = await makeLogDir();
+  try {
+    const lines = Array.from(
+      { length: 20 },
+      (_, i) => `line-${String(i).padStart(3, "0")}-${"x".repeat(40)}`,
+    );
+    const content = `${lines.join("\n")}\n`;
+    const logPath = await writeLog(dir, content);
+    const maxSizeMB = 0.0005;
+    const maxBytes = Math.floor(maxSizeMB * 1024 * 1024);
+    const targetBytes = Math.floor(maxBytes * 0.5);
+    const opts = resolveOptions({
+      logPathOverride: logPath,
+      maxLines: 20000,
+      maxSizeMB,
+      maxAgeDays: 365,
+    });
+    const result = await trimLog(opts);
+    assert.equal(result.trimmed, true);
+    assert.ok(result.afterBytes <= targetBytes);
+    const after = await fsp.readFile(logPath, "utf8");
+    assert.ok(Buffer.byteLength(after, "utf8") <= targetBytes);
+    const afterLines = after.split("\n").filter((l) => l.length > 0);
+    assert.equal(afterLines[afterLines.length - 1], lines[lines.length - 1]);
+    const entries = await fsp.readdir(dir);
+    assert.deepEqual(entries, ["opencode.log"]);
+  } finally {
+    await cleanupDir(dir);
+  }
+});
+
+test("trimLog hysteresis leaves headroom so the next pass is a no-op", async () => {
+  const dir = await makeLogDir();
+  try {
+    const lines = Array.from(
+      { length: 10 },
+      (_, i) => `headroom entry ${String(i).padStart(3, "0")} :: payload`,
+    );
+    const logPath = await writeLog(dir, `${lines.join("\n")}\n`);
+    const opts = resolveOptions({
+      logPathOverride: logPath,
+      maxLines: 4,
+      maxAgeDays: 365,
+    });
+    const first = await trimLog(opts);
+    assert.equal(first.trimmed, true);
+    assert.equal(first.afterLines, 2);
+    const second = await trimLog(opts);
+    assert.equal(second.trimmed, false);
+    assert.equal(second.reason, "within-limits");
+    const after = await fsp.readFile(logPath, "utf8");
+    assert.equal(after, `${lines.slice(-2).join("\n")}\n`);
   } finally {
     await cleanupDir(dir);
   }
