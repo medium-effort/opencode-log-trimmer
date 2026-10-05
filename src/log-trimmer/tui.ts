@@ -256,7 +256,7 @@ export const tuiPlugin = Plugin.define({
                   title: "Trim opencode.log",
                   description: "Manually trim opencode.log now",
                   palette: true,
-                  slash: { name: "log-trim" },
+                  slash: { name: "trim-log" },
                   run: async () => {
                     try {
                       try {

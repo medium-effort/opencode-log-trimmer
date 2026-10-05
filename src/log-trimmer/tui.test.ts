@@ -140,7 +140,7 @@ test("setup registers exactly one app slot and defers layer to render (owner-sco
   assert.equal(layer.commands.length, 1);
   const cmd = layer.commands[0];
   assert.equal(cmd.id, "log-trimmer.trim");
-  assert.equal(cmd.slash?.name, "log-trim");
+  assert.equal(cmd.slash?.name, "trim-log");
   assert.equal(cmd.palette, true);
   assert.equal(typeof cmd.run, "function");
 });

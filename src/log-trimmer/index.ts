@@ -1,6 +1,5 @@
 import { Plugin } from "@opencode/plugin";
 import { logTrimRpc } from "./rpc.js";
-import { registerLogTrimCommand } from "./command.js";
 import { resolveOptions } from "./options.js";
 import type { TrimOptions, TrimResult } from "./options.js";
 import { resolveLogPath } from "./path.js";
@@ -77,17 +76,6 @@ export default Plugin.define({
         resolvedOpts.intervalMs > 0
           ? resolvedOpts.intervalMs
           : 1800000;
-
-      // Slash command registration (never throws to the host).
-      // Silent fallback is always kept even if RPC registration fails.
-      try {
-        registerLogTrimCommand(ctx, () => resolvedOpts);
-      } catch (err) {
-        console.error(
-          "[opencode-log-trimmer] failed to register log-trim-silent command:",
-          err,
-        );
-      }
 
       const persist = (res: unknown): void => {
         try {
