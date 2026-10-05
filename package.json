@@ -1,0 +1,18 @@
+{
+  "name": "opencode-log-trimmer",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Periodic size+lines+age trimming of the global opencode.log via an OpenCode v2 server plugin",
+  "exports": {
+    ".": "./src/log-trimmer/index.ts",
+    "./tui": "./src/log-trimmer/tui.ts",
+    "./rpc": "./src/log-trimmer/rpc.ts"
+  },
+  "scripts": {
+    "test": "tsc -p tsconfig.json --outDir ./build-test --rootDir ./src && node --test ./build-test/log-trimmer/*.test.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@opencode/plugin": "latest"
+  }
+}
