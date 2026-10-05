@@ -186,6 +186,55 @@ export function isTrimUnavailable(err: unknown): boolean {
   }
 }
 
+function resolveTrimDirectory(ctx: unknown): string | undefined {
+  try {
+    const c = ctx as unknown as {
+      location?: { directory?: unknown };
+      data?: { location?: { default?: unknown } };
+    };
+    try {
+      const direct = c?.location?.directory;
+      if (typeof direct === "string" && direct.length > 0) {
+        return direct;
+      }
+    } catch {
+      // Ignore direct lookup failures, try the fallback.
+    }
+    try {
+      const def = (c as any)?.data?.location?.default;
+      if (typeof def === "function") {
+        const ref = (c as any).data.location.default()?.directory;
+        if (typeof ref === "string" && ref.length > 0) {
+          return ref;
+        }
+      }
+    } catch {
+      // Ignore fallback lookup failures.
+    }
+  } catch {
+    // Never throw to the host.
+  }
+  return undefined;
+}
+
+function buildTrimRpcOptions(
+  directory: string | undefined,
+):
+  | { location: { directory: string }; headers: Record<string, string> }
+  | undefined {
+  try {
+    if (typeof directory !== "string" || directory.length === 0) {
+      return undefined;
+    }
+    return {
+      location: { directory },
+      headers: { "x-opencode-directory": directory },
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 export const tuiPlugin = Plugin.define({
   id: "opencode-log-trimmer-tui",
   setup(ctx) {
@@ -223,7 +272,11 @@ export const tuiPlugin = Plugin.define({
                           logTrimRpc,
                         ) as unknown as {
                           trim: (
-                            input?: unknown,
+                            input: {},
+                            options?: {
+                              location?: { directory?: string };
+                              headers?: Record<string, string>;
+                            },
                           ) => Promise<{
                             trimmed?: unknown;
                             reason?: unknown;
@@ -233,6 +286,12 @@ export const tuiPlugin = Plugin.define({
                             afterLines?: unknown;
                           }>;
                         };
+                        const directory = resolveTrimDirectory(ctx);
+                        const rpcOptions = buildTrimRpcOptions(directory);
+                        const callTrim = () =>
+                          rpcOptions !== undefined
+                            ? api.trim({}, rpcOptions)
+                            : api.trim({});
                         let res: {
                           trimmed?: unknown;
                           reason?: unknown;
@@ -242,10 +301,12 @@ export const tuiPlugin = Plugin.define({
                           afterLines?: unknown;
                         };
                         try {
-                          res = await api.trim({});
+                          res = await callTrim();
                         } catch (firstErr) {
                           // Single retry for the startup race: the TUI can
                           // mount before the server registers the trim RPC.
+                          // Location routing covers BOTH channels with the
+                          // SAME second-arg options on the retry.
                           if (!isTrimUnavailable(firstErr)) {
                             throw firstErr;
                           }
@@ -256,7 +317,7 @@ export const tuiPlugin = Plugin.define({
                           } catch {
                             // Timer must never throw.
                           }
-                          res = await api.trim({});
+                          res = await callTrim();
                         }
                         const trimmed = (res as any)?.trimmed === true;
                         const reason =

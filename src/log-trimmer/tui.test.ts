@@ -3,13 +3,17 @@ import assert from "node:assert/strict";
 import { tuiPlugin, formatTrimError, isTrimUnavailable, TRIM_UNAVAILABLE_HINT } from "./tui.js";
 import def from "./tui.js";
 
-function makeStubCtx(trimImpl?: () => Promise<unknown>) {
+function makeStubCtx(
+  trimImpl?: (...args: Array<any>) => Promise<unknown>,
+  stubOpts?: { directory?: string },
+) {
   const slots: Array<any> = [];
   const layers: Array<any> = [];
   const toasts: Array<any> = [];
   const rpcCalls: Array<unknown> = [];
+  const trimCalls: Array<{ input: unknown; options: unknown }> = [];
   let inRender = false;
-  const trim =
+  const rawTrim =
     trimImpl ??
     (async () => ({
       trimmed: true,
@@ -19,7 +23,18 @@ function makeStubCtx(trimImpl?: () => Promise<unknown>) {
       beforeLines: 20061,
       afterLines: 20000,
     }));
+  const trim = async (...args: Array<any>) => {
+    trimCalls.push({ input: args[0], options: args[1] });
+    return rawTrim(...args);
+  };
+  const directory = stubOpts?.directory;
   const ctx: any = {
+    ...(directory !== undefined
+      ? {
+          location: { directory },
+          data: { location: { default: () => ({ directory }) } },
+        }
+      : {}),
     keymap: {
       // Owner gate: the host only provides a Solid owner inside a
       // slot-mounted render. A direct-in-setup layer() call throws
@@ -59,7 +74,7 @@ function makeStubCtx(trimImpl?: () => Promise<unknown>) {
       inRender = false;
     }
   };
-  return { ctx, slots, layers, toasts, rpcCalls, renderSlots };
+  return { ctx, slots, layers, toasts, rpcCalls, trimCalls, renderSlots };
 }
 
 function silenceSetup(ctx: any) {
@@ -484,4 +499,128 @@ test("run with non-unavailable error does NOT retry", async () => {
   const errToast = stub.toasts[1];
   assert.ok(String(errToast?.message).includes("Trim failed"));
   assert.ok(!String(errToast?.message).includes("opencode-log-trimmer"));
+});
+
+test("run routes trim RPC with location+header when directory resolves", async () => {
+  const dir = "/tmp/instance-repo";
+  const stub = makeStubCtx(undefined, { directory: dir });
+  silenceSetup(stub.ctx);
+  stub.renderSlots();
+  await assert.doesNotReject(stub.layers[0].commands[0].run());
+  assert.equal(stub.trimCalls.length, 1, `expected one trim call, got ${stub.trimCalls.length}`);
+  const call = stub.trimCalls[0] as any;
+  assert.deepEqual(call.input, {}, "first arg must stay exactly {}");
+  assert.ok(call.options !== undefined, "expected second-arg routing options");
+  assert.deepEqual(
+    (call.options as any)?.location,
+    { directory: dir },
+    "location must echo directory",
+  );
+  assert.equal(
+    (call.options as any)?.headers?.["x-opencode-directory"],
+    dir,
+    "header must echo directory",
+  );
+  assert.ok(stub.toasts.length >= 2);
+  assert.equal(stub.toasts[0]?.message, "Trim started");
+  assert.ok(String(stub.toasts[1]?.message).includes("Trim done"));
+});
+
+test("run carries SAME location+header options on single unavailable retry", async () => {
+  const dir = "/tmp/instance-repo";
+  let calls = 0;
+  const stub = makeStubCtx(
+    async () => {
+      calls += 1;
+      throw { type: "rpc", message: "rpc unavailable" };
+    },
+    { directory: dir },
+  );
+  silenceSetup(stub.ctx);
+  stub.renderSlots();
+  await assert.doesNotReject(stub.layers[0].commands[0].run());
+  assert.equal(calls, 2, `expected exactly one retry, got ${calls}`);
+  assert.equal(stub.trimCalls.length, 2, `expected two trim calls, got ${stub.trimCalls.length}`);
+  for (const call of stub.trimCalls) {
+    const c = call as any;
+    assert.deepEqual(c.input, {}, "first arg must stay exactly {} on both calls");
+    assert.deepEqual(
+      c.options?.location,
+      { directory: dir },
+      "retry must carry SAME location",
+    );
+    assert.equal(
+      c.options?.headers?.["x-opencode-directory"],
+      dir,
+      "retry must carry SAME header",
+    );
+  }
+  const errToast = stub.toasts[1];
+  assert.ok(String(errToast?.message).includes("Trim failed"));
+  assert.ok(String(errToast?.message).includes("opencode-log-trimmer"));
+});
+
+test("run falls back to data.location.default when ctx.location missing", async () => {
+  const dir = "/tmp/fallback-repo";
+  const stub = makeStubCtx(undefined, { directory: dir });
+  // Drop the direct location so only the default() fallback remains.
+  delete (stub.ctx as any).location;
+  assert.equal((stub.ctx as any)?.location, undefined);
+  silenceSetup(stub.ctx);
+  stub.renderSlots();
+  await assert.doesNotReject(stub.layers[0].commands[0].run());
+  assert.equal(stub.trimCalls.length, 1);
+  const call = stub.trimCalls[0] as any;
+  assert.deepEqual(call.input, {}, "first arg must stay exactly {}");
+  assert.deepEqual(call.options?.location, { directory: dir });
+  assert.equal(call.options?.headers?.["x-opencode-directory"], dir);
+});
+
+test("run degrades to legacy trim({}) when no directory resolves", async () => {
+  const stub = makeStubCtx();
+  assert.equal((stub.ctx as any)?.location, undefined);
+  assert.equal((stub.ctx as any)?.data, undefined);
+  silenceSetup(stub.ctx);
+  stub.renderSlots();
+  await assert.doesNotReject(stub.layers[0].commands[0].run());
+  assert.equal(stub.trimCalls.length, 1);
+  const call = stub.trimCalls[0] as any;
+  assert.deepEqual(call.input, {}, "first arg must stay exactly {}");
+  assert.equal(call.options, undefined, "expected no second arg when no directory");
+  assert.ok(String(stub.toasts[1]?.message).includes("Trim done"));
+});
+
+test("run with hostile location/default never throws and degrades", async () => {
+  const stub = makeStubCtx();
+  silenceSetup(stub.ctx);
+  stub.renderSlots();
+  // Hostile shapes: throwing getters plus throwing default().
+  const hostileDir = {
+    get directory(): unknown {
+      throw new Error("location-boom");
+    },
+  };
+  (stub.ctx as any).location = hostileDir;
+  (stub.ctx as any).data = {
+    location: {
+      default: () => {
+        throw new Error("default-boom");
+      },
+    },
+  };
+  await assert.doesNotReject(stub.layers[0].commands[0].run());
+  assert.ok(stub.trimCalls.length >= 1);
+  const call = stub.trimCalls[0] as any;
+  assert.deepEqual(call.input, {}, "first arg must stay exactly {}");
+  assert.equal(call.options, undefined, "hostile resolve must degrade to legacy");
+  assert.ok(stub.toasts.length >= 2);
+  assert.equal(stub.toasts[0]?.message, "Trim started");
+  // Null-data hostile run also never throws.
+  const hostile2 = makeStubCtx();
+  silenceSetup(hostile2.ctx);
+  hostile2.renderSlots();
+  (hostile2.ctx as any).location = null;
+  (hostile2.ctx as any).data = null;
+  await assert.doesNotReject(hostile2.layers[0].commands[0].run());
+  assert.equal((hostile2.trimCalls[0] as any)?.options, undefined);
 });
